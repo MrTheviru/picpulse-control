@@ -1,0 +1,67 @@
+import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import fs from 'node:fs';import worker,{chooseTemplate,renderCompany} from './worker.mjs';import {normalizeImport} from './public/excel-import.js';
+const sqlite=new DatabaseSync(':memory:');sqlite.exec(fs.readFileSync(new URL('schema.sql',import.meta.url),'utf8'));
+const DB={prepare(sql){const p=sqlite.prepare(sql);let args=[];return {bind(...x){args=x;return this},async first(){return p.get(...args)||null},async all(){return {results:p.all(...args)}},async run(){return {meta:{changes:Number(p.run(...args).changes)}}}}}};
+const env={DB,LOCAL_DEV:'1',ASSETS:{fetch:async req=>{const p=new URL(req.url).pathname;try{return new Response(fs.readFileSync(new URL('public'+p,import.meta.url),'utf8'))}catch{return new Response('Not found',{status:404})}}}};
+const call=async(path,body,extra={})=>{const r=await worker.fetch(new Request('https://console.example'+path,body?{method:'POST',headers:{Origin:'https://console.example','Content-Type':'application/json'},body:JSON.stringify(body)}:{}),{...env,...extra});return {status:r.status,body:await r.json()}};
+assert.equal(chooseTemplate({category:'nail_salon'}),'01-nailsy');assert.equal(chooseTemplate({category:'restaurant',name:'Dining Room'}),'02-tastyc');assert.equal(chooseTemplate({category:'restaurant_cafe',name:'Burger Spot'}),'03-grand-restaurant');assert.equal(chooseTemplate({category:'hair_beauty_salon'}),'04-elysia');
+const l={id:'TEST-1',business_name:'Test Nail Studio <script>',category:'nail_salon',business_phone:'+94710000000',business_email:'owner@example.com',area:'Colombo',email_verified:true,public_preview:true};
+assert.equal((await call('/api/leads',l)).status,200);
+assert.equal((await call('/api/claim-send',{lead_id:l.id})).body.allowed,false);
+const build=await call('/api/build',{lead_id:l.id});assert.equal(build.status,200);assert.ok(build.body.html.includes('Test Nail Studio &lt;script&gt;'));assert.ok(!build.body.html.includes('{{NAME}}'));assert.ok(!build.body.html.includes('310-999-8007'));
+assert.equal((await call('/api/events',{lead_id:l.id,type:'email_sent'})).status,400);
+await call('/api/events',{lead_id:l.id,type:'published',site_url:'https://test.netlify.app/x.html',deployment_state:'ready'});
+assert.equal((await call('/api/claim-send',{lead_id:l.id})).body.allowed,true);assert.equal((await call('/api/claim-send',{lead_id:l.id})).body.allowed,false);
+await call('/api/events',{lead_id:l.id,type:'email_sent',message_id:'MSG',thread_id:'THREAD',recipient:'owner@example.com'});
+await call('/api/replies',{message_id:'REPLY',thread_id:'THREAD',sender:'Owner <owner@example.com>',body:'no thanks'});
+let row=(await call('/api/state')).body.leads[0];assert.equal(row.email_status,'opted_out');assert.equal(row.data.opt_out,true);
+await call('/api/leads',{...row.data,business_name:'Updated name'});row=(await call('/api/state')).body.leads[0];assert.equal(row.email_status,'opted_out');assert.equal(row.website_status,'published');
+await call('/api/leads',{...l,business_name:'Imported change',opt_out:false});row=(await call('/api/state')).body.leads[0];assert.equal(row.data.opt_out,true);assert.equal(row.data.needs_rebuild,true);
+assert.equal((await call('/api/state',null,{LOCAL_DEV:'0'})).status,401);
+assert.equal((await call('/api/replies',{message_id:'OTHER',thread_id:'UNKNOWN',body:'Hello'})).body.matched,false);
+assert.equal(normalizeImport([{business_name:'Test',category:'salon',business_email:'a@example.com',email_verified:true}]).valid[0].email_verified,false);
+const render=renderCompany('{{NAME}} {{LOGO}} {{GALLERY}} {{HOURS}}',{business_name:'Logo Test',category:'salon',logo_verified:true,logo_url:'https://assets.example/logo.png',approved_images:[{url:'javascript:alert(1)',permission:'licensed'}],opening_hours:[]},'https://console.example');assert.ok(render.includes('https://assets.example/logo.png'));assert.ok(!render.includes('javascript:'));
+for(const key of ['01-nailsy','02-tastyc','03-grand-restaurant','04-elysia']){const source=fs.readFileSync(new URL('public/templates/'+key+'/index.html',import.meta.url),'utf8');const rendered=renderCompany(source,{...l,template_override:key},'https://console.example');assert.ok(!/\{\{[A-Z_]+\}\}/.test(rendered));}
+for(const key of ['01-nailsy','04-elysia']){
+ const source=fs.readFileSync(new URL('public/templates/'+key+'/index.html',import.meta.url),'utf8');
+ const html=renderCompany(source,{...l,services:[{name:'Nail art <script>',price:'9999',price_verified:false},{name:'Haircuts',description:'Owner supplied description',price:'2500',price_verified:true}],approved_images:[{service:'Haircuts',url:'https://assets.example/approved.jpg',permission:'owner_supplied'},{service:'Nail art <script>',url:'javascript:alert(1)',permission:'licensed'}]},'https://console.example');
+ assert.ok(html.includes('Nail art &lt;script&gt;'));
+ assert.ok(html.includes('https://assets.example/approved.jpg'));
+ assert.ok(!html.includes('javascript:'));
+ assert.ok(!html.includes('9999'));
+ assert.ok(html.includes('2500'));
+ assert.ok(html.includes('Owner supplied description'));
+ assert.ok(html.includes('Template photo · design reference'));
+ assert.equal((html.match(key==='01-nailsy'?/class="pp-service-detail"/g:/class="pp-service-card"/g)||[]).length,2);
+}
+const uploaded={id:'UPLOAD-1',business_name:'Nightly Test Salon',category:'nail_salon',area:'Colombo',business_email:'nightly@example.com',email_verified:true,outreach_approved:true,public_preview:true};
+await call('/api/leads',{leads:[uploaded],source:'nightly_upload'});
+let uploadedRow=(await call('/api/state')).body.leads.find(r=>r.id==='UPLOAD-1');
+assert.equal(uploadedRow.data.email_verified,false);assert.equal(uploadedRow.data.public_preview,false);
+await call('/api/build',{lead_id:'UPLOAD-1'});
+assert.equal((await call('/api/events',{lead_id:'UPLOAD-1',type:'published',site_url:'https://console.example/samples/UPLOAD-1',deployment_state:'ready',public_preview:true},{AUTOMATIC_SENDING_ENABLED:'1'})).status,400);
+await call('/api/leads',{leads:[{...uploaded,email_source_url:'https://business.example/contact'}],source:'nightly_upload',approve_verified_outreach:true});
+await call('/api/events',{lead_id:'UPLOAD-1',type:'published',site_url:'https://console.example/samples/UPLOAD-1',deployment_state:'ready',public_preview:true},{AUTOMATIC_SENDING_ENABLED:'1'});
+await call('/api/leads',{leads:[{...uploaded,email_verified:false,public_preview:false,official_website_url:''}],source:'nightly_upload'});
+uploadedRow=(await call('/api/state')).body.leads.find(r=>r.id==='UPLOAD-1');
+assert.equal(uploadedRow.data.email_verified,true);assert.equal(uploadedRow.data.outreach_approved,true);assert.equal(uploadedRow.data.public_preview,true);assert.equal(uploadedRow.website_status,'published');
+await call('/api/leads',{leads:[{...uploaded,business_email:'different@example.com'}],source:'nightly_upload'});
+uploadedRow=(await call('/api/state')).body.leads.find(r=>r.id==='UPLOAD-1');
+assert.equal(uploadedRow.data.email_verified,false);assert.equal(uploadedRow.data.outreach_approved,false);
+const duplicateUpload=await call('/api/leads',{leads:[{...uploaded,id:'A-DIFFERENT-UPLOAD-ID'}],source:'nightly_upload'});
+assert.deepEqual(duplicateUpload.body.ids,['UPLOAD-1']);assert.ok(!(await call('/api/state')).body.leads.some(r=>r.id==='A-DIFFERENT-UPLOAD-ID'));
+const reused=await call('/api/leads',{leads:[{id:'UPLOAD-1',business_name:'An Entirely Different Salon',category:'nail_salon',area:'Galle'}],source:'nightly_upload'});
+assert.notEqual(reused.body.ids[0],'UPLOAD-1');assert.equal((await call('/api/state')).body.leads.find(r=>r.id==='UPLOAD-1').data.business_name,'Nightly Test Salon');
+const sentState=(await call('/api/state')).body;assert.equal(sentState.sent_total,1);assert.equal(sentState.sent_offers[0].recipient,'owner@example.com');assert.equal(sentState.sent_offers[0].lead_id,l.id);
+const nativeFetch=globalThis.fetch;let webhookCalls=0;
+try{
+ globalThis.fetch=async(url,options)=>{assert.equal(url,'https://n8n.example/webhook/upload');assert.equal(options.headers.Authorization,'Bearer test-key');assert.deepEqual(JSON.parse(options.body).lead_ids,['UPLOAD-1']);webhookCalls++;return new Response('{}');};
+ const handoff=await call('/api/leads',{leads:[uploaded],source:'nightly_upload',run_after_import:true},{N8N_RUN_URL:'https://n8n.example/webhook/upload',API_KEY:'test-key'});
+ assert.equal(handoff.body.automation.requested,true);assert.equal(webhookCalls,1);
+ globalThis.fetch=async()=>new Response('{}',{status:503});
+ const held=await call('/api/leads',{leads:[uploaded],source:'nightly_upload',run_after_import:true},{N8N_RUN_URL:'https://n8n.example/webhook/upload',API_KEY:'test-key'});
+ assert.equal(held.status,200);assert.equal(held.body.automation.requested,false);assert.ok(held.body.automation.error);
+ const runFailure=await call('/api/run',{action:'process_queued'},{N8N_RUN_URL:'https://n8n.example/webhook/upload',API_KEY:'test-key'});
+ assert.equal(runFailure.status,502);assert.match(runFailure.body.error,/HTTP 503/);
+ assert.ok((await call('/api/state')).body.events.some(e=>e.type==='automation_start_failed'&&JSON.parse(e.detail).source==='dashboard'));
+}finally{globalThis.fetch=nativeFetch;}
+console.log('Passed: nightly upload approval gates, approval preservation, changed-email revalidation, publication controls, template mapping, service photos, escaping, import safeguards, authentication, send locks, replies, opt-out, history and four templates.');

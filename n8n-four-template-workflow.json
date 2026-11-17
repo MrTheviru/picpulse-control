@@ -1,0 +1,998 @@
+{
+  "name": "PicPulse Control \u2014 Four Template Websites",
+  "nodes": [
+    {
+      "id": "4b2a7cbe-180d-40e0-8e87-96531330d280",
+      "name": "Run PicPulse pilot",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "70024f1b-dcfc-4098-bd20-bd5a4309db8d",
+      "name": "Daily at 9 AM Colombo \u2014 disabled",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        220
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "disabled": true
+    },
+    {
+      "id": "c4b8fa82-9f27-41af-8474-19ff13ce0f9c",
+      "name": "PicPulse settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{\n mode:'preview', consoleUrl:'https://picpulse-control.thevirulakwan.workers.dev',\n hostingConnected:false,gmailConnected:false,sendEmails:false,publicLinksVerified:false,\n maxWebsitesPerRun:10,maxEmailsPerRun:3,\n netlifySiteId:'433289d3-11d7-44c9-a5c3-6abfcaec7814',\n setupPriceLKR:20000,quarterlyPriceLKR:4000,optOutEmails:[]\n}}];"
+      }
+    },
+    {
+      "id": "1f3bf2eb-5dcc-407c-bc3b-e3753d464db3",
+      "name": "Build websites from PicPulse templates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('PicPulse settings').first().json.consoleUrl + '/api/build' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {lead_id:$json.id} }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "9490ee8e-acc1-4230-9ae0-165533add05c",
+      "name": "Package deployable ZIP",
+      "type": "n8n-nodes-base.compression",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        100
+      ],
+      "parameters": {
+        "operation": "compress",
+        "binaryPropertyName": "={{ $json.binaryFields }}",
+        "outputFormat": "zip",
+        "fileName": "picpulse-colombo-sites.zip",
+        "binaryPropertyOutput": "websiteZip"
+      }
+    },
+    {
+      "id": "46dd0075-55df-4a56-ba65-ef0c89ce916a",
+      "name": "Live hosting connected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2020,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "608cd2dc-813b-4762-a472-452a4ae0f4c7",
+              "leftValue": "={{ $json.cfg.mode === 'live' && $json.cfg.hostingConnected === true && !!$json.cfg.netlifySiteId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d3c225fb-8d5d-4946-83c5-c1a9e85316e3",
+      "name": "Preview results \u2014 no emails sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2290,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const i=$input.first();return [{json:{mode:'preview',websiteCount:i.json.websiteCount,checks:i.json.checks,readyEmailCount:i.json.leads.filter(l=>l.email_verified).length,missingEmailCount:i.json.leads.filter(l=>!l.email_verified).length,next:'Connect Netlify and Gmail, enable their nodes, then change PicPulse settings to live. New lead discovery needs a permitted lead-feed URL.',leads:i.json.leads.map(l=>({id:l.id,name:l.name,template:l.template,priority:l.priority,status:l.status}))},binary:{websiteZip:i.binary.websiteZip}}];"
+      }
+    },
+    {
+      "id": "9c73c9ea-cbbc-4c44-97c0-2e3df4c3c916",
+      "name": "Publish ZIP to Netlify \u2014 connect credential",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2290,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.netlify.com/api/v1/sites/' + $('PicPulse settings').first().json.netlifySiteId + '/deploys' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/zip"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "websiteZip",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "disabled": true
+    },
+    {
+      "id": "9c4be327-6aa2-463d-a709-a3c42e487ad8",
+      "name": "Keep deployment reference",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2550,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "const d=$input.first().json;if(!d.id)throw new Error('No real deployment ID returned. Connect and enable the Netlify node.');return [{json:{deployId:d.id,attempt:0}}];"
+      }
+    },
+    {
+      "id": "e924e95f-f1fc-41e5-b644-04647a5b9049",
+      "name": "Wait for deployment",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2800,
+        -120
+      ],
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "ddb46d6d-bbd1-4694-801d-9d75c18a1de6",
+      "name": "Read deployment status \u2014 connect credential",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3050,
+        -120
+      ],
+      "parameters": {
+        "url": "={{ 'https://api.netlify.com/api/v1/deploys/' + $json.deployId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "disabled": true
+    },
+    {
+      "id": "74388f27-196a-4c4c-b0ea-129d128b5af7",
+      "name": "Validate live deployment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "const d=$input.first().json;const prev=$('Wait for deployment').item.json;const attempt=prev.attempt+1;if(d.state==='error'||d.state==='failed')throw new Error('Deployment failed; outreach blocked.');if(d.state!=='ready'&&attempt>=6)throw new Error('Deployment not ready after six checks; outreach blocked.');return [{json:{deployId:prev.deployId,attempt,ready:d.state==='ready',siteUrl:d.ssl_url||d.ssl_deploy_url||'',state:d.state}}];"
+      }
+    },
+    {
+      "id": "92300919-61b6-496f-bb3f-c2cae5c774b9",
+      "name": "Deployment is live?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3560,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6813b6ec-df67-4435-ac22-bef4757d89b2",
+              "leftValue": "={{ $json.ready === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c4bfcd73-f4b7-44b8-8979-b6b9fefbc737",
+      "name": "Prepare eligible outreach",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3820,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "const d=$('Validate live deployment').last().json;const cfg=$('PicPulse settings').first().json;\nif(!/^https:\\/\\/[a-z0-9.-]+\\.netlify\\.app\\/?$/i.test(d.siteUrl))throw new Error('Missing verified HTTPS site URL; outreach blocked.');\nconst bundle=$('Package personalized company pages').first().json;\nconst escapeHtml=s=>String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nreturn bundle.leads.filter(l=>l.email_verified&&!l.opt_out).slice(0,cfg.maxEmailsPerRun).map(l=>{\n const siteUrl=d.siteUrl.replace(/\\/$/,'')+l.pagePath;\n const subject='PicPulse website concept for '+l.name+' ['+l.id+']';\n const message=`<p>Hello ${escapeHtml(l.name)} team,</p><p>I'm Theviru from PicPulse. We prepared an independent sample website design for your business.</p><p><a href=\"${siteUrl}\">View your website concept</a></p><p>This is an unofficial proposal using AI concept imagery and sample content. We would replace these with your approved details.</p><p>Our Basic package is <strong>LKR ${cfg.setupPriceLKR.toLocaleString()} setup</strong>, with <strong>LKR ${cfg.quarterlyPriceLKR.toLocaleString()} maintenance every three months</strong>. The first three months are included. The website includes a mobile layout, services or menu, gallery, contact links and directions. Custom domain registration and paid third-party services are extra. Booking and larger packages can be quoted separately.</p><p>Reply if you like the direction. No obligation. If you prefer no further contact, reply \u201cno thanks\u201d and we will stop.</p><p>Theviru<br>PicPulse</p>`;\n return {json:{id:l.id,name:l.name,email:l.email,siteUrl,subject,message,sendEnabled:cfg.sendEmails===true&&cfg.gmailConnected===true&&cfg.publicLinksVerified===true}};\n});"
+      }
+    },
+    {
+      "id": "c0db788e-ad6c-44ab-ba28-7f09bdf53f8f",
+      "name": "Gmail sending connected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4080,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1b0fda80-9c01-42ef-97a2-fbfe397aaa26",
+              "leftValue": "={{ $json.sendEnabled === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0f11f19d-6f33-4d2c-966f-f86657ebad14",
+      "name": "Hold email until Gmail is connected",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4350,
+        220
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(i=>({json:{...i.json,status:'published_email_held'}}));"
+      }
+    },
+    {
+      "id": "c99df487-577f-4c50-a287-078d74c50c1f",
+      "name": "Process emails one at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        4350,
+        -120
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "b3e9f06f-1ebc-4c72-9b91-72444f3391f7",
+      "name": "Check Sent folder \u2014 connect Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        4610,
+        -120
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "q": "={{ 'in:sent to:' + $json.email + ' subject:\"' + $json.subject + '\"' }}"
+        }
+      },
+      "disabled": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e89740fd-2cbf-41b9-a5b5-e24ac108a7ba",
+      "name": "Already contacted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4870,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3b4fa3ca-6600-43fa-8ffa-ebf637b85763",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e0a9909d-0578-46ac-8165-72245b85d006",
+      "name": "Skip duplicate outreach",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5130,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{...$('Process emails one at a time').item.json,status:'already_contacted'}}];"
+      }
+    },
+    {
+      "id": "4bfd03c8-75cc-44b7-899d-0ae5fb1e96bd",
+      "name": "Send PicPulse offer \u2014 connect Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        5130,
+        20
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Process emails one at a time').item.json.email }}",
+        "subject": "={{ $('Process emails one at a time').item.json.subject }}",
+        "emailType": "html",
+        "message": "={{ $('Process emails one at a time').item.json.message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "disabled": true
+    },
+    {
+      "id": "39e507b9-7e2b-4d97-a890-7fa808b09bca",
+      "name": "Record confirmed email result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5390,
+        20
+      ],
+      "parameters": {
+        "jsCode": "const r=$input.first().json;if(!r.id||!r.threadId)throw Error('Gmail send not confirmed');return [{json:{...$('Process emails one at a time').item.json,status:'accepted_by_gmail',gmailMessageId:r.id,gmailThreadId:r.threadId,sentAt:new Date().toISOString()}}];"
+      }
+    },
+    {
+      "id": "84856885-89bb-4255-ad8e-e1f27f3c0fbb",
+      "name": "Outreach batch complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4610,
+        -500
+      ],
+      "parameters": {
+        "jsCode": "return $input.all();"
+      }
+    },
+    {
+      "id": "35116c4b-17e4-4428-a9f8-0a04c514b40c",
+      "name": "START HERE \u2014 preview is ready",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -440
+      ],
+      "parameters": {
+        "content": "# PicPulse Control\nFour company templates are rendered by your authenticated dashboard. Select the console Bearer Auth credential on dashboard HTTP nodes, Netlify Bearer Auth on hosting nodes, and Gmail OAuth on Gmail nodes.\n\nThis portable workflow is inactive. Hosting and Gmail nodes are disabled; configure and test before enabling. Public URL verification and verified recipient details are required for sends. No secrets are included.",
+        "height": 300,
+        "width": 600
+      }
+    },
+    {
+      "id": "25bb6707-bb5c-4038-be6b-f45800aedb9f",
+      "name": "Connect hosting and email once",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2150,
+        -660
+      ],
+      "parameters": {
+        "content": "# PicPulse Control\nFour company templates are rendered by your authenticated dashboard. Select the console Bearer Auth credential on dashboard HTTP nodes, Netlify Bearer Auth on hosting nodes, and Gmail OAuth on Gmail nodes.\n\nThis portable workflow is inactive. Hosting and Gmail nodes are disabled; configure and test before enabling. Public URL verification and verified recipient details are required for sends. No secrets are included.",
+        "height": 410,
+        "width": 650
+      }
+    },
+    {
+      "id": "1517403f-eeb3-4707-9bcb-beca237d5d3b",
+      "name": "Read dashboard businesses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('PicPulse settings').first().json.consoleUrl + '/api/state' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "edf8c147-4fb5-45b7-955f-cc5ee30e075c",
+      "name": "Select eligible business records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('PicPulse settings').first().json;\nconst rows=$input.first().json.leads||[];\nreturn rows.filter(r=>!r.data.official_website_url&&!r.data.opt_out&&(r.website_status!=='published'||r.data.needs_rebuild)).slice(0,cfg.maxWebsitesPerRun).map(r=>({json:{...r.data,id:r.id,name:r.data.business_name||r.data.name,email:r.data.business_email||'',email_verified:r.data.email_verified===true,template:r.template,pagePath:'/prospects/'+r.id+'.html'}}));"
+      }
+    },
+    {
+      "id": "f4de8176-e6f2-4bb7-961c-9b926b770227",
+      "name": "Package personalized company pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const binary={};const results=$input.all();const leads=$('Select eligible business records').all().map(x=>x.json);let n=0;\nfor(const r of results){const d=r.json;if(!d.html||!d.id)throw Error('Template service did not return a company page');binary['file'+n++]={data:Buffer.from(d.html).toString('base64'),fileName:'prospects/'+d.id+'.html',mimeType:'text/html',fileExtension:'html'};}\nif(!n)throw Error('No company pages returned');\nreturn [{json:{cfg:$('PicPulse settings').first().json,leads,binaryFields:Object.keys(binary).join(','),websiteCount:n},binary}];"
+      }
+    },
+    {
+      "id": "024c7c6d-9818-4bbc-b995-4f02dfed613a",
+      "name": "Prepare deployment status events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3610,
+        60
+      ],
+      "parameters": {
+        "jsCode": "const d=$input.first().json;return $('Package personalized company pages').first().json.leads.map(l=>({json:{lead_id:l.id,type:'published',site_url:d.siteUrl.replace(/\\/$/,'')+l.pagePath,deployment_state:'ready',event_id:'deploy-'+d.deployId+'-'+l.id}}));"
+      }
+    },
+    {
+      "id": "0026f775-2bab-4709-92d6-0f0a654e6cb8",
+      "name": "Record website publication in dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3830,
+        60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('PicPulse settings').first().json.consoleUrl + '/api/events' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "9928f7ce-a647-4b13-bfd4-c45979cd7999",
+      "name": "Claim outreach once in dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5100,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('PicPulse settings').first().json.consoleUrl + '/api/claim-send' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {lead_id:$('Process emails one at a time').item.json.id,campaign:'initial'} }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "500051e2-1271-4c4d-989f-6d9ea8f31d32",
+      "name": "Outreach claim allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5300,
+        120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e0d7853c-4b54-4c11-9999-6b4523ac54ed",
+              "leftValue": "={{ $json.allowed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "82341798-cbf9-449a-8e8a-203e2758cd78",
+      "name": "Record Gmail acceptance in dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5600,
+        40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('PicPulse settings').first().json.consoleUrl + '/api/events' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {lead_id:$json.id,type:'email_sent',message_id:$json.gmailMessageId,thread_id:$json.gmailThreadId,recipient:$json.email,subject:$json.subject,body:$json.message,event_id:'gmail-'+$json.gmailMessageId} }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run PicPulse pilot": {
+      "main": [
+        [
+          {
+            "node": "PicPulse settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily at 9 AM Colombo \u2014 disabled": {
+      "main": [
+        [
+          {
+            "node": "PicPulse settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PicPulse settings": {
+      "main": [
+        [
+          {
+            "node": "Read dashboard businesses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build websites from PicPulse templates": {
+      "main": [
+        [
+          {
+            "node": "Package personalized company pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package deployable ZIP": {
+      "main": [
+        [
+          {
+            "node": "Live hosting connected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Live hosting connected?": {
+      "main": [
+        [
+          {
+            "node": "Publish ZIP to Netlify \u2014 connect credential",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preview results \u2014 no emails sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish ZIP to Netlify \u2014 connect credential": {
+      "main": [
+        [
+          {
+            "node": "Keep deployment reference",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep deployment reference": {
+      "main": [
+        [
+          {
+            "node": "Wait for deployment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for deployment": {
+      "main": [
+        [
+          {
+            "node": "Read deployment status \u2014 connect credential",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read deployment status \u2014 connect credential": {
+      "main": [
+        [
+          {
+            "node": "Validate live deployment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate live deployment": {
+      "main": [
+        [
+          {
+            "node": "Deployment is live?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deployment is live?": {
+      "main": [
+        [
+          {
+            "node": "Prepare deployment status events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for deployment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare eligible outreach": {
+      "main": [
+        [
+          {
+            "node": "Gmail sending connected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail sending connected?": {
+      "main": [
+        [
+          {
+            "node": "Process emails one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hold email until Gmail is connected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process emails one at a time": {
+      "main": [
+        [
+          {
+            "node": "Outreach batch complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Sent folder \u2014 connect Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Sent folder \u2014 connect Gmail": {
+      "main": [
+        [
+          {
+            "node": "Already contacted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already contacted?": {
+      "main": [
+        [
+          {
+            "node": "Skip duplicate outreach",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim outreach once in dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip duplicate outreach": {
+      "main": [
+        [
+          {
+            "node": "Process emails one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send PicPulse offer \u2014 connect Gmail": {
+      "main": [
+        [
+          {
+            "node": "Record confirmed email result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record confirmed email result": {
+      "main": [
+        [
+          {
+            "node": "Record Gmail acceptance in dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read dashboard businesses": {
+      "main": [
+        [
+          {
+            "node": "Select eligible business records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select eligible business records": {
+      "main": [
+        [
+          {
+            "node": "Build websites from PicPulse templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package personalized company pages": {
+      "main": [
+        [
+          {
+            "node": "Package deployable ZIP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare deployment status events": {
+      "main": [
+        [
+          {
+            "node": "Record website publication in dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record website publication in dashboard": {
+      "main": [
+        [
+          {
+            "node": "Prepare eligible outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim outreach once in dashboard": {
+      "main": [
+        [
+          {
+            "node": "Outreach claim allowed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outreach claim allowed?": {
+      "main": [
+        [
+          {
+            "node": "Send PicPulse offer \u2014 connect Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip duplicate outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Gmail acceptance in dashboard": {
+      "main": [
+        [
+          {
+            "node": "Process emails one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Colombo",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "active": false
+}

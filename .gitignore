@@ -1,0 +1,34 @@
+local.sqlite*
+.dev.vars
+.wrangler/
+node_modules/
+test-results/
+
+# Private operational records, contacts, outreach and locally generated evidence.
+contact-research-*.csv
+contact-research-*.json
+contact-research-*.md
+email-primary-observations.json
+prepared-outreach-*.json
+prepared-outreach-*.md
+sent-outreach-*-confirmations.json
+seed-leads.json
+test-existing-lead-upload.json
+test-existing-lead-upload.xlsx
+test-nightly-upload.json
+template-review/
+*.png
+full-test-*.md
+public/qa/PP-L*.html
+
+# Live n8n exports can contain business-specific run configuration.
+n8n-published-*.json
+n8n-successful-*.json
+n8n-send-*.json
+n8n-tested-*.json
+n8n-nightly-upload-workflow.json
+n8n-reply-monitor.json
+prepare-contact-research.py
+prepare-five-send-workflow.py
+prepare-nightly-workflow.py
+progress.json

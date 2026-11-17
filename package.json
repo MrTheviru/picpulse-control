@@ -1,0 +1,12 @@
+{
+  "devDependencies": {
+    "wrangler": "^4.149.0"
+  },
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test.mjs",
+    "preview": "node local.mjs",
+    "deploy": "wrangler deploy"
+  }
+}
